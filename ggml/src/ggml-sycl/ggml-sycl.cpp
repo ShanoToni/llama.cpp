@@ -231,11 +231,10 @@ static void ggml_check_sycl() try {
         g_sycl_loaded = true;
         ggml_backend_sycl_print_sycl_devices();
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 /*
@@ -266,11 +265,10 @@ GGML_API void ggml_backend_sycl_get_gpu_list(int *id_list, int max_len) try {
         id_list[i] = i;
     }
     return;
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 // sycl buffer
@@ -316,11 +314,10 @@ ggml_backend_sycl_buffer_free_buffer(ggml_backend_buffer_t buffer) try {
     ggml_sycl_set_device(ctx->device);
 
     delete ctx;
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void * ggml_backend_sycl_buffer_get_base(ggml_backend_buffer_t buffer) {
@@ -355,37 +352,141 @@ ggml_backend_sycl_buffer_init_tensor(ggml_backend_buffer_t buffer,
         }
     }
     return GGML_STATUS_SUCCESS;
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
-static void ggml_backend_sycl_buffer_set_tensor(ggml_backend_buffer_t buffer,
-                                                ggml_tensor *tensor,
-                                                const void *data, size_t offset,
-                                                size_t size) try {
+// anton
 
-    ggml_backend_sycl_buffer_context * ctx = ( ggml_backend_sycl_buffer_context *)buffer->context;
+/*
+*/
+/*
+static void reorder_qw_on_tensor_set(ggml_tensor * tensor, dpct::queue_ptr stream){
+    if(g_ggml_sycl_disable_optimize){
+        return;
+        }
+        if (tensor->type == GGML_TYPE_Q4_0
+                                // && src1->ne[1/2] == 1
+                                // && dst->op == GGML_MUL_MAT
+                                ){
+        char*data_device = (char*)tensor->data;
+        size_t ncols = tensor->ne[0];
+        size_t nrows = tensor->ne[1];
+        size_t size = ggml_nbytes(tensor);
+        
+        auto tmp_buf = sycl::malloc_device<char>(size, *stream);
+        SYCL_CHECK(
+            CHECK_TRY_ERROR((*stream).memcpy(tmp_buf, data_device, size)
+            .wait()));
+            
+            GGML_ASSERT((size % sizeof(block_q4_0) == 0));
+            auto qs_ptr = (uint8_t*)data_device;
+            auto d_ptr = (sycl::half*)(qs_ptr + ncols * nrows / 2);
+            
+            stream->parallel_for(
+                size / sizeof(block_q4_0),
+                [=](auto i)[[sycl::reqd_sub_group_size(WARP_SIZE)]]{
+                    const block_q4_0* x = (const block_q4_0*)tmp_buf;
+                    const int ib = i;
+                    
+                    for (int j = 0; j < QK4_0/2; j ++)
+                    {
+                        *(qs_ptr + ib * QK4_0 / 2 + j) = x[ib].qs[j];
+                    }
+                    *(d_ptr + ib) = x[ib].d;
+                }).wait();
+                
+                sycl::free(tmp_buf, *stream);
+                ggml_tensor_extra_gpu* extra = (ggml_tensor_extra_gpu*)tensor->extra;
+                GGML_ASSERT(extra);
+                extra->optimized_feature.reorder = true;
+            }
+}
+/*
+
+static void ggml_backend_sycl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data,
+                                                size_t offset, size_t size) try {
+    ggml_backend_sycl_buffer_context * ctx = (ggml_backend_sycl_buffer_context *) buffer->context;
+    ggml_sycl_set_device(ctx->device);
+    auto stream = &(dpct::dev_mgr::instance().get_device(ctx->device).default_queue());
+
+    SYCL_CHECK(CHECK_TRY_ERROR((*stream).memcpy((char *) tensor->data + offset, (const char *) data, size).wait()));
+    reorder_qw_on_tensor_set(tensor, stream);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
+}
+
+*/
+static void ggml_backend_sycl_buffer_set_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, const void * data,
+    size_t offset, size_t size) try {
+        ggml_backend_sycl_buffer_context * ctx = (ggml_backend_sycl_buffer_context *) buffer->context;
     ggml_sycl_set_device(ctx->device);
     auto stream = &(dpct::dev_mgr::instance().get_device(ctx->device).default_queue());
     SYCL_CHECK(
         CHECK_TRY_ERROR(dpct::dev_mgr::instance().get_device(ctx->device).queues_wait_and_throw()));
-    // Note: Use host buffer to save the data from mmap(), then copy to device. It's workaround for mmap() issue on PVC GPU.
-    // This function will be called during load model from disk. Use memory buffer replace dynamic won't save more time and brings potential memory leak risk here.
-    char* host_buf = (char*)malloc(size);
-    memcpy(host_buf, data, size);
-    SYCL_CHECK(
-        CHECK_TRY_ERROR((*stream).memcpy((char *)tensor->data + offset, host_buf, size)
-                             .wait()));
-    free(host_buf);
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
-}
+        // Note: Use host buffer to save the data from mmap(), then copy to device. It's workaround for mmap() issue on PVC GPU.
+        // This function will be called during load model from disk. Use memory buffer replace dynamic won't save more time and brings potential memory leak risk here.
+        char* host_buf = (char*)malloc(size);
+        
+        memcpy(host_buf, data, size);
+        
+        SYCL_CHECK(CHECK_TRY_ERROR((*stream).memcpy((char *) tensor->data + offset, host_buf, size).wait()));
+        
+        free(host_buf);
+        
+    } catch (const sycl::exception & exc) {
+        std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+        std::exit(1);
+        }
+        
+        /*
+        */
+        /*
+        static char* reorder_qw_on_tensor_get(const ggml_tensor * tensor, dpct::queue_ptr stream) {
+            if (g_ggml_sycl_disable_optimize) {
+        return (char*)tensor->data;
+    }
+    if (tensor->type == GGML_TYPE_Q4_0 && tensor->extra) {
+        ggml_tensor_extra_gpu * extra = (ggml_tensor_extra_gpu *) tensor->extra;
+        GGML_ASSERT(extra);
+        
+        if (!extra->optimized_feature.reorder) {
+            return (char*)tensor->data;
+        }
+        char * data_device = (char *) tensor->data;
+        size_t ncols       = tensor->ne[0];
+        size_t nrows       = tensor->ne[1];
+        size_t size        = ggml_nbytes(tensor);
+
+        char* tmp_buf = sycl::malloc_device<char>(size, *stream);
+        // q0,q1,q2,d,q0,q1,q2,d
+        // -> q0,q1,q2, q0,q1,q2, d, d
+        GGML_ASSERT((size % sizeof(block_q4_0) == 0));
+        auto qs_ptr = (uint8_t *) data_device;
+        auto d_ptr  = (sycl::half *) (qs_ptr + ncols * nrows / 2);
+        auto num_blocks = size / sizeof(block_q4_0);
+        block_q4_0 * x  = (block_q4_0 *) tmp_buf;
+        
+        stream->parallel_for(num_blocks, [=](auto block_id)[[sycl::reqd_sub_group_size(WARP_SIZE)]] {
+            auto num_qs_per_block = QK4_0 /2;
+            for (int qs_block_idx = 0; qs_block_idx < num_qs_per_block; qs_block_idx++) {
+                x[block_id].qs[qs_block_idx] = *(qs_ptr + block_id * num_qs_per_block + qs_block_idx);
+                // *(qs_ptr + block_id * num_qs_per_block + qs_block_idx) = x[block_id].qs[qs_block_idx];
+
+            }
+            x[block_id].d = *(d_ptr + block_id);
+            //*(d_ptr + block_id) = x[block_id].d;
+
+        }).wait();
+        return tmp_buf;
+        }
+        return (char*)tensor->data;
+        }
+/*
 
 static void ggml_backend_sycl_buffer_get_tensor(ggml_backend_buffer_t buffer,
                                                 const ggml_tensor *tensor,
@@ -396,19 +497,46 @@ static void ggml_backend_sycl_buffer_get_tensor(ggml_backend_buffer_t buffer,
 
     ggml_sycl_set_device(ctx->device);
     auto stream = dpct::dev_mgr::instance().get_device(ctx->device).default_queue();
+    
+    auto tmp_data = reorder_qw_on_tensor_get(tensor, &stream);
 
-    SYCL_CHECK(CHECK_TRY_ERROR(
-        stream.memcpy(data, (const char *)tensor->data + offset, size)
-            .wait()));
+    SYCL_CHECK(CHECK_TRY_ERROR(stream.memcpy(data, (char *) tmp_data + offset, size).wait()));
+    if((ggml_tensor_extra_gpu *)tensor->extra )
+    {
+        ggml_tensor_extra_gpu * extra = (ggml_tensor_extra_gpu *)tensor->extra;
+        if(extra->optimized_feature.reorder){
+            sycl::free(tmp_data, stream);
+        }
+    }
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
+}
+
+*/
+static void ggml_backend_sycl_buffer_get_tensor(ggml_backend_buffer_t buffer,
+const ggml_tensor *tensor,
+void *data, size_t offset,
+size_t size) try {
+    
+ggml_backend_sycl_buffer_context * ctx = ( ggml_backend_sycl_buffer_context *)buffer->context;
+
+ggml_sycl_set_device(ctx->device);
+auto stream = dpct::dev_mgr::instance().get_device(ctx->device).default_queue();
+
+SYCL_CHECK(CHECK_TRY_ERROR(
+    stream.memcpy(data, (const char *)tensor->data + offset, size)
+    .wait()));
 }
 catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__
+    << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void dev2dev_memcpy(sycl::queue &q_dst, sycl::queue &q_src, void *ptr_dst,
-                    const void *ptr_src, size_t size) {
+const void *ptr_src, size_t size) {
     char *host_buf = (char *)malloc(size);
     q_src.memcpy(host_buf, (const char *)ptr_src, size).wait();
     q_dst.memcpy((char *)ptr_dst, host_buf, size).wait();
@@ -417,8 +545,8 @@ static void dev2dev_memcpy(sycl::queue &q_dst, sycl::queue &q_src, void *ptr_dst
 
 static bool
 ggml_backend_sycl_buffer_cpy_tensor(ggml_backend_buffer_t buffer,
-                                    const ggml_tensor *src,
-                                    ggml_tensor *dst) try {
+const ggml_tensor *src,
+ggml_tensor *dst) try {
     if (ggml_backend_buffer_is_sycl(src->buffer)) {
         ggml_backend_sycl_buffer_context * src_ctx = (ggml_backend_sycl_buffer_context *)src->buffer->context;
         ggml_backend_sycl_buffer_context * dst_ctx = (ggml_backend_sycl_buffer_context *)dst->buffer->context;
@@ -483,14 +611,11 @@ static void ggml_backend_sycl_buffer_clear(ggml_backend_buffer_t buffer,
     SYCL_CHECK(
         CHECK_TRY_ERROR(dpct::get_current_device().queues_wait_and_throw()));
 
-    SYCL_CHECK(CHECK_TRY_ERROR((*stream)
-                                    .memset(ctx->dev_ptr, value, buffer->size)
-                                    .wait()));
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+    SYCL_CHECK(CHECK_TRY_ERROR((*stream).memset(ctx->dev_ptr, value, buffer->size).wait()));
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_backend_sycl_buffer_memset_tensor(ggml_backend_buffer_t buffer, ggml_tensor * tensor, uint8_t value,
@@ -570,11 +695,10 @@ ggml_backend_sycl_buffer_type_alloc_buffer(ggml_backend_buffer_type_t buft,
     }
     ggml_backend_sycl_buffer_context * ctx = new  ggml_backend_sycl_buffer_context(buft_ctx->device, dev_ptr, buft_ctx->stream);
     return ggml_backend_buffer_init(buft, ggml_backend_sycl_buffer_interface, ctx, size);
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static size_t ggml_backend_sycl_buffer_type_get_alignment(ggml_backend_buffer_type_t buft) {
@@ -747,11 +871,10 @@ struct ggml_backend_sycl_split_buffer_context {
         for (ggml_tensor_extra_gpu * extra : tensor_extras) {
             release_extra_gpu(extra, streams);
         }
-    }
-    catch (sycl::exception const &exc) {
-      std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-                << ", line:" << __LINE__ << std::endl;
-      std::exit(1);
+
+    } catch (const sycl::exception & exc) {
+        std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+        std::exit(1);
     }
 
     std::vector<ggml_tensor_extra_gpu *> tensor_extras;
@@ -846,11 +969,10 @@ ggml_backend_sycl_split_buffer_init_tensor(ggml_backend_buffer_t buffer,
     }
     tensor->extra = extra;
     return GGML_STATUS_SUCCESS;
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void
@@ -899,11 +1021,10 @@ ggml_backend_sycl_split_buffer_set_tensor(ggml_backend_buffer_t buffer,
                 .memcpy(extra->data_device[i], buf_host, original_size)
                 .wait()));
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void
@@ -952,11 +1073,10 @@ ggml_backend_sycl_split_buffer_get_tensor(ggml_backend_buffer_t buffer,
                 .memcpy(buf_host, extra->data_device[i], original_size)
                 .wait()));
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_backend_sycl_split_buffer_clear(ggml_backend_buffer_t buffer, uint8_t value) {
@@ -1960,11 +2080,10 @@ static dpct::err0 ggml_sycl_cpy_tensor_2d(void *dst,
         }
         return 0;
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_sycl_op_repeat(ggml_backend_sycl_context & ctx, ggml_tensor *dst) {
@@ -2089,11 +2208,10 @@ inline void ggml_sycl_op_mul_mat_sycl(
     GGML_UNUSED(dst);
     GGML_UNUSED(src1_ddq_i);
     GGML_UNUSED(src1_padded_row_size);
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_sycl_op_pool2d(ggml_backend_sycl_context & ctx, ggml_tensor *dst) {
@@ -2592,13 +2710,11 @@ static void ggml_sycl_op_mul_mat(ggml_backend_sycl_context & ctx, const ggml_ten
             }
         }
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
-}
 
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
+}
 
 static void ggml_sycl_repeat(ggml_backend_sycl_context & ctx, ggml_tensor * dst) {
     GGML_SYCL_DEBUG("call %s\n", __func__);
@@ -2660,11 +2776,10 @@ static void ggml_sycl_mul_mat_vec_p021(ggml_backend_sycl_context & ctx, const gg
     float * dst_ddf  = (float *) dst->data;
 
     ggml_mul_mat_p021_f16_f32_sycl(src0_ddq, src1_ddf, dst_ddf, ne00, ne01, ne02, ne12, main_stream);
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_sycl_mul_mat_vec_nc(ggml_backend_sycl_context & ctx, const ggml_tensor *src0,
@@ -2696,12 +2811,12 @@ static void ggml_sycl_mul_mat_vec_nc(ggml_backend_sycl_context & ctx, const ggml
     const int64_t row_stride_x = nb01 / sizeof(sycl::half);
     const int64_t channel_stride_x = nb02 / sizeof(sycl::half);
 
-    ggml_mul_mat_vec_nc_f16_f32_sycl(src0_ddq, src1_ddf, dst_ddf, ne00, ne01, row_stride_x, ne02, ne12, channel_stride_x, main_stream);
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+    ggml_mul_mat_vec_nc_f16_f32_sycl(src0_ddq, src1_ddf, dst_ddf, ne00, ne01, row_stride_x, ne02, ne12,
+                                     channel_stride_x, main_stream);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void k_compute_batched_ptrs(const sycl::half *src0_as_f16,
@@ -2831,11 +2946,10 @@ static void ggml_sycl_mul_mat_batched_sycl(ggml_backend_sycl_context & ctx,
             (const void **) (ptrs_src.get() + 1 * ne23), dpct::library_data_t::real_half, nb11 / nb10, beta,
             (void **) (ptrs_dst.get() + 0 * ne23), cu_data_type, ne01, ne23, cu_compute_type, matrix_info.get())));
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 inline bool ggml_sycl_supports_mmq(enum ggml_type type) {
@@ -2907,7 +3021,7 @@ static void ggml_sycl_mul_mat(ggml_backend_sycl_context & ctx, const ggml_tensor
     // mmvq path is faster in the CUDA backend.
     if (ctx.stream()->get_backend() == sycl::backend::ext_oneapi_cuda)
         use_dequantize_mul_mat_vec = use_dequantize_mul_mat_vec && !use_mul_mat_vec_q;
-
+// Anton
     if (!split && src0->type == GGML_TYPE_F16 && ggml_is_permuted(src0) && ggml_is_permuted(src1) && src1->ne[1] == 1) {
         // TODO: Refactor and cleanup of mul mat dispatching.
         if (src0->ne[3] == 1 && src1->ne[3] == 1) {
@@ -3164,11 +3278,10 @@ static void ggml_sycl_mul_mat_id(ggml_backend_sycl_context & ctx,
             }
         }
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_sycl_scale(ggml_backend_sycl_context & ctx, ggml_tensor * dst) {
@@ -3227,11 +3340,10 @@ static void ggml_sycl_set_main_device(const int main_device) try {
         GGML_LOG_INFO("Using device %d (%s) as main device\n",
                 main_device, prop.get_name());
     }
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static bool ggml_sycl_compute_forward(ggml_backend_sycl_context & ctx, struct ggml_tensor * dst) try {
@@ -3439,11 +3551,10 @@ GGML_API void ggml_backend_sycl_get_device_description(int device, char *descrip
     SYCL_CHECK(CHECK_TRY_ERROR(dpct::get_device_info(
         prop, dpct::dev_mgr::instance().get_device(device))));
     snprintf(description, description_size, "%s", prop.get_name());
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 void ggml_backend_sycl_get_device_memory(int device, size_t *free,
@@ -3461,13 +3572,11 @@ void ggml_backend_sycl_get_device_memory(int device, size_t *free,
     device information which may not be supported by all compilers or runtimes.
     You may need to adjust the code.
     */
-    SYCL_CHECK(CHECK_TRY_ERROR(
-        dpct::dev_mgr::instance().get_device(device).get_memory_info(*free, *total)));
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+    SYCL_CHECK(CHECK_TRY_ERROR(dpct::dev_mgr::instance().get_device(device).get_memory_info(*free, *total)));
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3497,13 +3606,11 @@ static void ggml_backend_sycl_set_tensor_async(ggml_backend_t backend,
 
     GGML_ASSERT(buf->buft == ggml_backend_sycl_buffer_type(sycl_ctx->device) && "unsupported buffer type");
     const queue_ptr stream = sycl_ctx->stream(sycl_ctx->device, 0);
-    SYCL_CHECK(CHECK_TRY_ERROR(
-        (stream)->memcpy((char *)tensor->data + offset, data, size)));
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+    SYCL_CHECK(CHECK_TRY_ERROR((stream)->memcpy((char *) tensor->data + offset, data, size)));
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_backend_sycl_get_tensor_async(ggml_backend_t backend,
@@ -3515,13 +3622,11 @@ static void ggml_backend_sycl_get_tensor_async(ggml_backend_t backend,
 
     GGML_ASSERT(buf->buft == ggml_backend_sycl_buffer_type(sycl_ctx->device) && "unsupported buffer type");
     const queue_ptr stream = sycl_ctx->stream(sycl_ctx->device, 0);
-    SYCL_CHECK(CHECK_TRY_ERROR((stream)->memcpy(
-        data, (const char *)tensor->data + offset, size).wait()));
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+    SYCL_CHECK(CHECK_TRY_ERROR((stream)->memcpy(data, (const char *) tensor->data + offset, size).wait()));
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static bool ggml_backend_sycl_cpy_tensor_async(ggml_backend_t backend,
@@ -3541,11 +3646,10 @@ static bool ggml_backend_sycl_cpy_tensor_async(ggml_backend_t backend,
     }
 
     return false;
-}
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static void ggml_backend_sycl_synchronize(ggml_backend_t backend) try {
@@ -3554,12 +3658,12 @@ static void ggml_backend_sycl_synchronize(ggml_backend_t backend) try {
     SYCL_CHECK(CHECK_TRY_ERROR((stream)->wait()));
 
     GGML_UNUSED(backend);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
-catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
-}
+
 
 static void reorder_qw(char *data_device, const int ncols, const int nrows,
                 size_t size, size_t offset, dpct::queue_ptr stream) {
@@ -3581,6 +3685,7 @@ static void reorder_qw(char *data_device, const int ncols, const int nrows,
 
             for (int j = 0; j < QK4_0/2; j ++)
             {
+               
                 *(qs_ptr + ib * QK4_0 / 2 + j) = x[ib].qs[j];
             }
             *(d_ptr + ib) = x[ib].d;
@@ -3614,9 +3719,19 @@ static void opt_for_reorder(ggml_tensor * dst, dpct::queue_ptr stream) {
 static void optimize_graph_once(ggml_cgraph * cgraph, ggml_backend_sycl_context * ctx) {
     dpct::queue_ptr stream = ctx->stream();
     if (ctx->optimized_graph) {
+        for (int i = 0; i < cgraph->n_nodes; i++) {
+            ggml_tensor *src0 = cgraph->nodes[i]->src[0]; 
+            ggml_tensor *src1 = cgraph->nodes[i]->src[1]; 
+            
+            if (cgraph->nodes[i]->op == GGML_OP_MUL_MAT && src0->type == GGML_TYPE_Q4_0 &&
+                src1->ne[2]==1 && src1->ne[3]==1) {
+                    printf("\nContext: %p\n ", ctx);
+                    printf("Current graph node should be optimised but is not due to ctx->optimized_graph = true\n");
+                }
+        }
        return;
     }
-    ctx->optimized_graph = true;
+     ctx->optimized_graph = true;
 
     for (int i = 0; i < cgraph->n_nodes; i++) {
         if (ctx->opt_feature.reorder) opt_for_reorder(cgraph->nodes[i], stream);
@@ -3672,7 +3787,7 @@ static ggml_status ggml_backend_sycl_graph_compute(ggml_backend_t backend, ggml_
             try {
                 sycl_ctx->exec_graph->update(model_sycl_graph);
                 GGML_SYCL_DEBUG("[SYCL-GRAPH] update success\n");
-            } catch (sycl::exception const & e) {
+            } catch (const sycl::exception & e) {
                 GGML_SYCL_DEBUG("[SYCL-GRAPH] Exception when updating graph, %s\n", e.what());
                 auto exec_graph = model_sycl_graph.finalize({sycl_ex::property::graph::updatable{}});
                 sycl_ctx->exec_graph = std::make_unique<
@@ -3700,9 +3815,8 @@ try
     const queue_ptr &stream = sycl_ctx->stream(sycl_ctx->device, 0);
     // Record the current state of the queue
     SYCL_CHECK(CHECK_TRY_ERROR(*sycl_event = stream->ext_oneapi_submit_barrier()));
-}
-catch (sycl::exception const &exc)
-{
+
+} catch (const sycl::exception & exc) {
     std::cerr << exc.what() << "Exception caught at file:" << __FILE__
               << ", line:" << __LINE__ << std::endl;
     std::exit(1);
@@ -3716,7 +3830,8 @@ static void ggml_backend_sycl_event_wait(ggml_backend_t backend, ggml_backend_ev
         SYCL_CHECK(CHECK_TRY_ERROR(sycl_event->wait()));
     } else
         GGML_ABORT("fatal error");
-} catch (sycl::exception const& exc) {
+
+} catch (const sycl::exception & exc) {
     std::cerr << exc.what() << "Exception caught at file:" << __FILE__
               << ", line:" << __LINE__ << std::endl;
     std::exit(1);
@@ -4095,22 +4210,21 @@ static void ggml_backend_sycl_device_event_free(ggml_backend_dev_t dev, ggml_bac
   }
 
   delete event;
-} catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
-}
 
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
+}
 
 static void ggml_backend_sycl_device_event_synchronize(ggml_backend_dev_t dev, ggml_backend_event_t event) try {
   GGML_UNUSED(dev);
 
   sycl::event *sycl_event = static_cast<sycl::event *>(event->context);
   SYCL_CHECK(CHECK_TRY_ERROR(sycl_event->wait()));
-} catch (sycl::exception const &exc) {
-  std::cerr << exc.what() << "Exception caught at file:" << __FILE__
-            << ", line:" << __LINE__ << std::endl;
-  std::exit(1);
+
+} catch (const sycl::exception & exc) {
+    std::cerr << exc.what() << "Exception caught at file:" << __FILE__ << ", line:" << __LINE__ << std::endl;
+    std::exit(1);
 }
 
 static const ggml_backend_device_i ggml_backend_sycl_device_interface = {
